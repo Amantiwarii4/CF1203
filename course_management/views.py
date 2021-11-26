@@ -1506,8 +1506,10 @@ def chapter_client_list(request):
             course_status1 = course_status[0]
             if score == None:
                 quiz_done = False
+                ispass = False
             else:
                 quiz_done = True
+                ispass = score.ispass
             chapter_data = chapter_serializer.data
             chapter_status_data = chapter_status_serializer.data
             for i in chapter_data:
@@ -1518,7 +1520,7 @@ def chapter_client_list(request):
                     else:
                         pass
             return JsonResponse(
-                {'status': True, 'message': 'Chapter listed successfully!', 'chapter_data': chapter_data, 'course_status':course_status1['course_status'],'Quiz_Completed':quiz_done,},
+                {'status': True, 'message': 'Chapter listed successfully!', 'chapter_data': chapter_data, 'course_status':course_status1['course_status'],'Quiz_Completed':quiz_done,'ispass':ispass},
                 safe=False)
         else:
             return JsonResponse({'status': False, 'message': 'Only get method is allowed'}, safe=False)
@@ -1948,12 +1950,15 @@ def answer_check(request):
 
                 else:
                     marks += 0
+            if marks/total >= 0.5:
+                result = True
+            else:
+                result = False
             score = Score.objects.filter(user=user,course_score=course).delete()
-            score = Score.objects.update_or_create(user=user,course_score=course,score=marks)
+            score = Score.objects.update_or_create(user=user,course_score=course,score=marks,ispass=result)
             score = Score.objects.get(user=user,course_score=course)
             score_serializer = ScoreSerializer(score)
-
-            return JsonResponse({'status':True,'data':score_serializer.data,'total_marks':total})
+            return JsonResponse({'status':True,'data':score_serializer.data,'total_marks':total,})
         except Exception as e:
             return JsonResponse({'ststus':False,'Exception':str(e),"message":str(lss)})
         return JsonResponse({'status':True,'data':'CBZ'})

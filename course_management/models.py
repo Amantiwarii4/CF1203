@@ -165,6 +165,7 @@ class Score(models.Model):
     user = models.ForeignKey(User, related_name='user_score', null=False, on_delete=models.CASCADE,default=1)
     course_score = models.ForeignKey(Course, related_name='course_score', null=False, on_delete=models.CASCADE,default=1)
     score = models.CharField(max_length=10,null=True,blank=True)
+    ispass = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
