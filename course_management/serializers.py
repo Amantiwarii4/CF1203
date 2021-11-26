@@ -1,15 +1,35 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from course_management.models import Course,Category,Chapter,CourseAlloted,Quiz_ques_answer,Quiz_question,Package,PackageAlloted,ChapterStatus,CourseStatus,Score
+from course_management.models import Course,Category,Chapter,CourseAlloted,Quiz_ques_answer,Quiz_question,Package,PackageAlloted,ChapterStatus,CourseStatus,Score,Banner,Upcomingevents,Services,CourseStatus,Query
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+
+class BannerSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Banner
+        # fields = ()
+        fields = '__all__'
+
+class EventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Upcomingevents
+        # fields = ()
+        fields = '__all__'
+
+
+class ServicesSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Services
+        # fields = ()
+        fields = '__all__'
 
 
 class PackageSerializer(serializers.ModelSerializer):
     class Meta:
         model = Package
         # fields = '__all__'
-        fields = ("id","name","about","course","image","price")
+        fields = ("id","name","about","course","image","price",)
+
 class PackageallotedSerializer(serializers.ModelSerializer):
     package_name = PackageSerializer(read_only=True)
     class Meta:
@@ -23,18 +43,13 @@ class CategorySerializer(serializers.ModelSerializer):
         # fields = ("id","title","about","status","category_image","date")
 
 class CourseSerializer(serializers.ModelSerializer):
-    category = CategorySerializer(read_only=True)
+    # category = CategorySerializer(read_only=True)
     class Meta:
         model = Course
         fields = "__all__"
         # fields = ("id","course_title","category_id","author","about","rating","total_hours","total_days","selling_price","original_price","status","course_level","bestseller","course_file","date")
 
-class ChapterSerializer(serializers.ModelSerializer):
-    course = CourseSerializer(read_only=True)
-    class Meta:
-        model = Chapter
-        fields = "__all__"
-        # fields = ("id", "chapter_name","category_id","course_id","about","discussions","bookmarks","status","chapter_file", "date")
+
 
 class ScoreSerializer(serializers.ModelSerializer):
     # chapter_score = ChapterSerializer(read_only=True, many=True)
@@ -56,11 +71,37 @@ class CourseAllotedSerializer(serializers.ModelSerializer):
 #         # fields = "__all__"
 #         fields = ("id","course_name", "course_status",)
 
+class ChapterclientSerializer(serializers.ModelSerializer):
+    # course = CourseSerializer(read_only=True)
+    class Meta:
+        model = Chapter
+        fields = "__all__"
+
 class ChapterStatusSerializer(serializers.ModelSerializer):
     # name = ChapterSerializer(read_only=True)
     class Meta:
         model = ChapterStatus
-        fields = ("name", "chapter_status","completedVideoLenght","totalVideoLength")
+        fields = ("name",'user', "chapter_status","completedVideoLenght","totalVideoLength","is_completed")
+
+class ChapterSerializer(serializers.ModelSerializer):
+    course = CourseSerializer(read_only=True)
+    # name = ChapterStatusSerializer(read_only=True,)
+    class Meta:
+        model = Chapter
+        fields = "__all__"
+        # fields = ("id", "course","chapter_name","about","discussions","bookmarks","status","chapter_file","chapter_video","extra_file","link","name")
+
+class CourseStatusSerializer(serializers.ModelSerializer):
+    name = ChapterSerializer(read_only=True)
+    class Meta:
+        model = CourseStatus
+        fields = ("name", "course_status",)
+
+class ChapterclientSerializer(serializers.ModelSerializer):
+    name = ChapterStatusSerializer(read_only=True)
+    class Meta:
+        model = Chapter
+        fields = "__all__"
 
 class UserSerializer(serializers.ModelSerializer):
     # alloted_courses = CourseAllotedSerializer(read_only=True, many=True)
@@ -105,3 +146,9 @@ class UsercourseSerializer(serializers.Serializer):
     class Meta:
         model = User
         fields = ("id","token","first_name","user_role","last_name","username",'email','status','user_image','phone')
+
+
+class QuerySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Query
+        fields = '__all__'

@@ -17,10 +17,10 @@ from rest_framework import status
 from rest_framework.serializers import Serializer
 from rest_framework.parsers import JSONParser
 from rest_framework.decorators import api_view
-from course_management.models import Category, Course, Chapter, CourseAlloted, Quiz_question, Quiz_ques_answer, Package, PackageAlloted, CourseStatus, ChapterStatus, Score
+from course_management.models import Category, Course, Chapter, CourseAlloted, Quiz_question, Quiz_ques_answer, Package, PackageAlloted, CourseStatus, ChapterStatus, Score, Banner, Upcomingevents, Services, Certificate, Query, Payments
 from course_management.serializers import ChangePasswordSerializer, QuizQuestionSerializer, QuizQuesAnswerSerializer, \
     CourseAllotedSerializer, UserSerializer, MyTokenObtainPairSerializer, CourseSerializer, CategorySerializer, \
-    ChapterSerializer, UsercourseSerializer, PackageSerializer, PackageallotedSerializer, ChapterStatusSerializer, ScoreSerializer
+    ChapterSerializer, UsercourseSerializer, PackageSerializer, PackageallotedSerializer, ChapterStatusSerializer, ScoreSerializer, BannerSerializer, EventSerializer, ServicesSerializer, ChapterclientSerializer, CourseStatusSerializer,QuerySerializer
 from datetime import date, datetime
 import random
 import json
@@ -36,7 +36,7 @@ from rest_framework import status
 from rest_framework.authentication import get_authorization_header
 from rest_framework import HTTP_HEADER_ENCODING
 import smtplib
-
+import razorpay
 # Create your views here.
 renderer_classes = [JSONRenderer]
 
@@ -144,12 +144,23 @@ def allot_course(request):
     if result['status'] == True:
         try:
             if request.method == 'POST':
+                # client = razorpay.Client(auth = ("rzp_test_uyIMOvTtAIVnuN", "lj4ElrD7sKLSBczz2VqJnexz"))
                 course_id = Course.objects.get(id=request.POST.get('course_id'))
                 user_id = User.objects.get(id=request.POST.get('user_id'))
                 try:
                     course = CourseAlloted.objects.get(user=user_id,course_name=course_id)
                 except:
                     course = None
+                try:
+                    razorpay_order_id = request.POST.get('razorpay_order_id')
+                    razorpay_payment_id = request.POST.get('razorpay_payment_id')
+                    razorpay_signature = request.POST.get('razorpay_signature')
+                except:
+                    razorpay_order_id = None
+                    razorpay_payment_id = None
+                    razorpay_signature = None
+                if razorpay_order_id is not None:
+                    Payments.objects.create(user=user_id,course=course_id,razorpay_order_id=razorpay_order_id,razorpay_payment_id=razorpay_payment_id,razorpay_signature=razorpay_signature)
                 if course == None:
                     course_allot = CourseAlloted.objects.create(course_name=course_id,
                                                                 user=user_id, course_status='Active',)
@@ -214,11 +225,49 @@ def change_chapter_status(request):
             if request.method == "POST":
                 user = User.objects.get(id=request.POST.get('user_id'))
                 chapter = Chapter.objects.get(id=request.POST.get('chapter_id'))
+                course = Course.objects.get(id=request.POST.get('course_id'))
                 status = request.POST.get('status')
                 completedVideoLenght = request.POST.get('completedVideoLenght')
                 totalVideoLength = request.POST.get('totalVideoLength')
-                ChapterStatus.objects.filter(name=chapter,user=user,).update(chapter_status=status,completedVideoLenght=completedVideoLenght,totalVideoLength=totalVideoLength)
-                return JsonResponse({'status':True,'message':'status changed !!'})
+                c_id = Chapter.objects.filter(course=course).values("id")
+                ch_id = []
+                for i in c_id:
+                    ch_id.append(i["id"])
+                chapter_count = len(ch_id)
+                if float(status) >= 0.9:
+                    is_completed = True
+                else:
+                    is_completed = False
+                try:
+                    c_status = ChapterStatus.objects.get(name=chapter,user=user,)
+                except:
+                    c_status = None
+                if c_status is not None:
+                    ChapterStatus.objects.filter(name=chapter,user=user,).update(chapter_status=status,completedVideoLenght=completedVideoLenght,totalVideoLength=totalVideoLength,is_completed=is_completed)
+                    completed = ChapterStatus.objects.filter(name__in=ch_id,user=user).values('is_completed')
+                    l = []
+                    for i in completed:
+                        l.append(i['is_completed'])
+                    flse = l.count(False)
+                    le = len(l)
+                    if flse == 0 and le == chapter_count:
+                        CourseStatus.objects.filter(user=user,name=course).update(course_status='completed')
+                    else:
+                        CourseStatus.objects.filter(user=user,name=course).update(course_status='0%')
+                    return JsonResponse({'status':True,'message':'status changed !!','chapter_count':ch_id})
+                else:
+                    ChapterStatus.objects.create(name=chapter,user=user,chapter_status=status,completedVideoLenght=completedVideoLenght,totalVideoLength=totalVideoLength,is_completed=is_completed)
+                    completed = ChapterStatus.objects.filter(name__in=ch_id,user=user).values('is_completed')
+                    l = []
+                    for i in completed:
+                        l.append(i['is_completed'])
+                    flse = l.count(False)
+                    le = len(l)
+                    if flse == 0 and le == chapter_count:
+                        CourseStatus.objects.filter(user=user,name=course).update(course_status='completed')
+                    else:
+                        CourseStatus.objects.filter(user=user,name=course).update(course_status='0%')
+                    return JsonResponse({'status':True,'message':'status changed !!',})
         except Exception as e:
             return JsonResponse({'status':False,'Excaprion':str(e)})
     return JsonResponse({'message':'Unauthorise User!!',})
@@ -286,7 +335,8 @@ def add_package(request):
                 about = request.POST.get('about')
                 price = request.POST.get('price')
                 image = request.FILES["image"]
-                Package.objects.create(name=name,course=course,about=about,price=price,image=image)
+                # payment_link = request.POST.get('payment_link')
+                Package.objects.create(name=name,course=course,about=about,price=price,image=image,)
                 return JsonResponse({"status":True,"message":"Package created sucessfull"})
         except Exception as e:
             return JsonResponse({"status":False,"exception":str(e)})
@@ -333,6 +383,25 @@ def show_package(request):
     return JsonResponse({"status":False, "message":"Unauthorise User"})
 
 @csrf_exempt
+def show_package_course(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == "POST":
+            try:
+                courses = Package.objects.filter(id=request.POST.get('package_id')).values("course")
+                s = courses[0]
+                k = s["course"]
+                l = []
+                for i in k:
+                    l.append(int(i))
+                course =  Course.objects.filter(id__in=l).all()
+                course_serializer = CourseSerializer(course,many=True)
+                return JsonResponse({'status':True,'data':course_serializer.data,})
+            except Exception as e:
+                return JsonResponse({'status':False,'Exception':str(e)})
+    return JsonResponse({"status":False, "message":"Unauthorise User"})
+
+@csrf_exempt
 def delete_package(request):
     result = authorized(request)
     if result['status'] == True:
@@ -354,6 +423,16 @@ def allot_package(request):
             courses = Package.objects.filter(id=request.POST.get('package_id')).values("course")
             package = Package.objects.get(id=request.POST.get('package_id'))
             user = User.objects.get(id=request.POST.get('user_id'))
+            try:
+                razorpay_order_id = request.POST.get('razorpay_order_id')
+                razorpay_payment_id = request.POST.get('razorpay_payment_id')
+                razorpay_signature = request.POST.get('razorpay_signature')
+            except:
+                razorpay_order_id = None
+                razorpay_payment_id = None
+                razorpay_signature = None
+            if razorpay_order_id is not None:
+                Payments.objects.create(user=user_id,course=course_id,razorpay_order_id=razorpay_order_id,razorpay_payment_id=razorpay_payment_id,razorpay_signature=razorpay_signature)
             try:
                 package_alloted = PackageAlloted.objects.get(user=user)
                 PackageAlloted.objects.filter(user=user).update(package_name=package)
@@ -387,11 +466,126 @@ def allot_package(request):
                                 chapter_status = None
                             if chapter_status == None:
                                 ChapterStatus.objects.create(name=chapter,user=user,chapter_status='0%',)
+                    else:
+                        try:
+                            course_status  = CourseStatus.objects.get(user=user,name_id=course_id)
+                        except:
+                            course_status = None
+                        if course_status == None:
+                            course_status  = CourseStatus.objects.create(name=course_id,
+                                                                    user=user, course_status='0%',)
+                        chapters = Chapter.objects.filter(course_id=course_id).values('id')
+                        for i in chapters:
+                            chapter = Chapter.objects.get(id=i['id'])
+                            try:
+                                chapter_status = ChapterStatus.objects.get(user=user,name_id=chapter)
+                            except:
+                                chapter_status = None
+                            if chapter_status == None:
+                                ChapterStatus.objects.create(name=chapter,user=user,chapter_status='0%',)
+                return JsonResponse({'status':True,'message':'Package alloted',})
+            except:
+                package_alloted = None
+            if package_alloted == None:
+                PackageAlloted.objects.create(package_name=package,user=user)
+                s = courses[0]
+                k = s["course"]
+                # course = s.split(",")
+                for i in k:
+                    course_id = Course.objects.get(id=int(i))
+                    try:
+                        course = CourseAlloted.objects.get(user=user,course_name=course_id)
+                    except:
+                        course = None
+                    if course == None:
+                        course_allot = CourseAlloted.objects.create(course_name=course_id,
+                                                                    user=user, course_status='Active',)
+                        courseAllot_serializer = CourseAllotedSerializer(data=course_allot)
+                        courseAllot_serializer.is_valid()
+                        try:
+                            course_status  = CourseStatus.objects.get(user=user,name_id=course_id)
+                        except:
+                            course_status = None
+                        if course_status == None:
+                            course_status  = CourseStatus.objects.create(name=course_id,
+                                                                    user=user, course_status='0%',)
+                        chapters = Chapter.objects.filter(course_id=course_id).values('id')
+                        for i in chapters:
+                            chapter = Chapter.objects.get(id=i['id'])
+                            try:
+                                chapter_status = ChapterStatus.objects.get(user=user,name_id=chapter)
+                            except:
+                                chapter_status = None
+                            if chapter_status == None:
+                                ChapterStatus.objects.create(name=chapter,user=user,chapter_status='0%',)
+                return JsonResponse({'status':True,'message':'Package alloted'})
+        except Exception as e:
+            return JsonResponse({'status':False,'Exception':str(e),})
+    return JsonResponse({'status':False,'message':'Unauthorised User'})
+
+
+def auto_allot_package(user_id,package_id):
+    result = authorized(request)
+    if result['status'] == True:
+        try:
+            courses = Package.objects.filter(id=package_id).values("course")
+            package = Package.objects.get(id=package_id)
+            user = User.objects.get(id=user_id)
+            try:
+                package_alloted = PackageAlloted.objects.get(user=user)
+                PackageAlloted.objects.filter(user=user).update(package_name=package)
+                s = courses[0]
+                k = s["course"]
+                # course = s.split(",")
+                for i in k:
+                    course_id = Course.objects.get(id=int(i))
+                    try:
+                        course = CourseAlloted.objects.get(user=user,course_name=course_id)
+                    except:
+                        course = None
+                    if course == None:
+                        course_allot = CourseAlloted.objects.create(course_name=course_id,
+                                                                    user=user, course_status='Active',)
+                        courseAllot_serializer = CourseAllotedSerializer(data=course_allot)
+                        courseAllot_serializer.is_valid()
+                        try:
+                            course_status  = CourseStatus.objects.get(user=user,name_id=course_id)
+                        except:
+                            course_status = None
+                        if course_status == None:
+                            course_status  = CourseStatus.objects.create(name=course_id,
+                                                                    user=user, course_status='0%',)
+                        chapters = Chapter.objects.filter(course_id=course_id).values('id')
+                        for i in chapters:
+                            chapter = Chapter.objects.get(id=i['id'])
+                            try:
+                                chapter_status = ChapterStatus.objects.get(user=user,name_id=chapter)
+                            except:
+                                chapter_status = None
+                            if chapter_status == None:
+                                ChapterStatus.objects.create(name=chapter,user=user,chapter_status='0%',)
+                    else:
+                        try:
+                            course_status  = CourseStatus.objects.get(user=user,name_id=course_id)
+                        except:
+                            course_status = None
+                        if course_status == None:
+                            course_status  = CourseStatus.objects.create(name=course_id,
+                                                                    user=user, course_status='0%',)
+                        chapters = Chapter.objects.filter(course_id=course_id).values('id')
+                        for i in chapters:
+                            chapter = Chapter.objects.get(id=i['id'])
+                            try:
+                                chapter_status = ChapterStatus.objects.get(user=user,name_id=chapter)
+                            except:
+                                chapter_status = None
+                            if chapter_status == None:
+                                ChapterStatus.objects.create(name=chapter,user=user,chapter_status='0%',)
                 return JsonResponse({'status':True,'message':'Package alloted successfull',})
             except:
                 package_alloted = None
             if package_alloted == None:
-                PackageAlloted.objects.update_or_create(package_name=package,user=user)
+                PackageAlloted.objects.create(package_name=package,user=user)
                 s = courses[0]
                 k = s["course"]
                 # course = s.split(",")
@@ -427,6 +621,7 @@ def allot_package(request):
             return JsonResponse({'status':False,'Exception':str(e),})
     return JsonResponse({'status':False,'message':'Unauthorised User'})
 
+
 def show_allotpackage(request):
     result = authorized(request)
     if result['status'] == True:
@@ -452,9 +647,14 @@ def show_client_package(request,user_id):
                 # for i in course:
                 #     courses = Course.objects.filter(id=int(i)).all()
                 #     data.append(courses)
-                allot_courses = CourseAlloted.objects.filter(user=user).all()
-                serializer = CourseAllotedSerializer(data=allot_courses,many=True)
-                serializer.is_valid()
+                # allot_courses = CourseAlloted.objects.filter(user=user).values('course_name')
+                allot_courses = CourseAlloted.objects.filter(user=user)
+                # l = []
+                # for i in allot_courses:
+                #     l.append(i['course_name'])
+                # course = CourseStatus.objects.filter(name__in=l,user=user).all()
+                # serializer = CourseStatusSerializer(course,many=True)
+                serializer = CourseAllotedSerializer(allot_courses,many=True)
                 return JsonResponse({"status":True,'data':serializer.data})
         except Exception as e:
             return JsonResponse({"status":False,'Exception':str(e)})
@@ -495,7 +695,7 @@ def user_login(request):
                 users = User.objects.get(email=email)
                 users_serializer = UserSerializer(users)
                 return JsonResponse(
-                    {'status': True, 'message': 'User logged in successfully!', 'data': users_serializer.data,
+                    {'status': True, 'message': 'User logged in successful!', 'data': users_serializer.data,
                      'type': type
                      })
             else:
@@ -527,6 +727,47 @@ def forgot_password(request):
             sent_from = gmail_user
             to = email
             subject = 'OTP'
+            body = 'Your otp is ' + str(otp) + ' .'
+
+            email_text = """\
+            From: %s
+            To: %s
+            Subject: %s
+
+            %s
+            """ % (sent_from, ", ".join(to), subject, body)
+
+            try:
+                smtp_server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+                smtp_server.ehlo()
+                smtp_server.login(gmail_user, gmail_password)
+                smtp_server.sendmail(sent_from, to, email_text)
+                smtp_server.close()
+                print("Email sent successfully!")
+            except Exception as ex:
+                return JsonResponse({"Exception": str(ex), })
+            return JsonResponse({'status': True, 'message': 'OTP sent to your email', 'otp': otp})
+    return JsonResponse({'status': False, 'message': 'Unauthorised'})
+
+@csrf_exempt
+def send_payment_mail(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == "POST":
+            email = request.POST.get('email')
+            try:
+                user = User.objects.get(email=email)
+            except:
+                user = None
+                return JsonResponse({'status': False, 'message': 'Email not found'})
+            otp = random.randint(1111, 9999)
+            User.objects.filter(email=email).update(otp=otp)
+            gmail_user = 'your_email@gmail.com'
+            gmail_password = 'your_password'
+
+            sent_from = gmail_user
+            to = email
+            subject = 'Payment Link'
             body = 'Your otp is ' + str(otp) + ' .'
 
             email_text = """\
@@ -655,7 +896,43 @@ def user_list(request):
             return JsonResponse({'status': False, 'message': 'Only get method is allowed'}, safe=False)
     else:
         return JsonResponse({'status': result['status'], 'message': result['message']}, safe=False)
+import string
+@csrf_exempt
+def singup(request):
+    result = authorized(request)
+    if result['status'] == True:
+        try:
+            phone = request.POST.get('phone')
+            email = request.POST.get('email')
+            first_name = request.POST.get('first_name')
+            # dob = request.POST.get('dob')
+            # gender = request.POST.get('gender')
+            last_name = request.POST.get('last_name')
+            password = request.POST.get('password')
+            try:
+                user = User.objects.get(phone=phone)
+            except:
+                user = None
+            try:
+                email1 = User.objects.get(email=email)
+            except:
+                email1 = None
+            if user is not None:
+                return JsonResponse({'status':False,'message':'Phone no. already exist',})
+            if email1 is not None:
+                return JsonResponse({'status':False,'message':'Email alreday exist'})
+            else:
+                S = 10
+                username = ''.join(random.choices(string.ascii_uppercase + string.digits, k=S))
 
+                user = User.objects.create_user(username=str(username),
+                                                        phone=phone,first_name=first_name,
+                                                        email=email,last_name=last_name,password=password)
+                user_serializer = UserSerializer(user)
+                return JsonResponse({'status':True,'message':'User added','data':user_serializer.data})
+        except Exception as e:
+            return JsonResponse({'status':False,'message':str(e)})
+    return JsonResponse({"message": "Unauthorised User", })
 
 def user_detail(request, uid):
     result = authorized(request)
@@ -939,26 +1216,24 @@ def add_course(request):
         try:
             if request.method == 'POST':
                 course_title = request.POST.get('course_title')
-                category_id = request.POST.get('category_id')
+                # category_id = request.POST.get('category_id')
                 author = request.POST.get('author')
                 about = request.POST.get('about')
-                rating = request.POST.get('rating')
-                total_hours = request.POST.get('total_hours')
-                total_days = request.POST.get('total_days')
+                # rating = request.POST.get('rating')
+                # total_hours = request.POST.get('total_hours')
+                # total_days = request.POST.get('total_days')
                 selling_price = request.POST.get('selling_price')
-                original_price = request.POST.get('original_price')
-                course_level = request.POST.get('course_level')
-                bestseller = request.POST.get('bestseller')
+                # original_price = request.POST.get('original_price')
+                # course_level = request.POST.get('course_level')
+                # bestseller = request.POST.get('bestseller')
                 link = request.POST.get('link')
                 course_file = request.FILES["course_file"]
-                category = Category.objects.get(id=category_id)
+                # category = Category.objects.get(id=category_id)
                 course_serializer = CourseSerializer(data=request.POST)
                 course_serializer.is_valid()
-                course = Course.objects.create(course_title=course_title, author=author, category=category,
-                                               about=about, rating=rating, status='1', total_hours=total_hours,
-                                               total_days=total_days, selling_price=selling_price,
-                                               original_price=original_price, course_level=course_level,
-                                               bestseller=bestseller, course_file=course_file, link=link)
+                course = Course.objects.create(course_title=course_title, author=author,
+                                               about=about, status='1',
+                                              course_file=course_file, link=link,selling_price=selling_price)
                 id = course.id
                 courses = Course.objects.get(id=id)
                 course_serializer = CourseSerializer(courses)
@@ -1018,14 +1293,14 @@ def course_detail(request, cid):
         if request.method == 'GET':
             course_serializer = CourseSerializer(courseDetail)
 
-            chapter = Chapter.objects.all().filter(course_id=cid)
-            chapter_serializer = ChapterSerializer(chapter, many=True)
+            # chapter = Chapter.objects.all().filter(course_id=cid)
+            # chapter_serializer = ChapterSerializer(chapter, many=True)
 
-            categoryDetail = Category.objects.get(id=courseDetail.category_id)
-            category_serializer = CategorySerializer(categoryDetail)
+            # categoryDetail = Category.objects.get(id=courseDetail.category_id)
+            # category_serializer = CategorySerializer(categoryDetail)
             return JsonResponse(
                 {'status': True, 'message': 'course details get successfully!', 'data': course_serializer.data,
-                 'chapters': chapter_serializer.data, 'category_data': category_serializer.data},
+                 },
             )
         else:
             return JsonResponse({'status': False, 'message': 'Only get method is allowed'}, safe=False)
@@ -1043,58 +1318,54 @@ def course_edit(request):
         except Course.DoesNotExist:
             return JsonResponse({'status': False, 'message': 'The Course does not exist'},
                                 )
+        try:
+            if request.method == 'POST':
+                course_title = request.POST.get('course_title')
+                # category_id = request.POST.get('category_id')
+                author = request.POST.get('author')
+                about = request.POST.get('about')
+                # rating = request.POST.get('rating')
+                # total_hours = request.POST.get('total_hours')
+                # total_days = request.POST.get('total_days')
+                selling_price = request.POST.get('selling_price')
+                # original_price = request.POST.get('original_price')
+                # course_level = request.POST.get('course_level')
+                # bestseller = request.POST.get('bestseller')
+                link = request.POST.get('link')
+                try:
+                    course_file = request.FILES["course_file"]
+                except:
+                    course_file = None
+                # category = Category.objects.get(id=category_id)
+                course_serializer = CourseSerializer(data=request.POST)
+                course_serializer.is_valid()
+                if course_file is not None:
+                    courses = Course.objects.filter(id=cid).update(course_title=course_title, author=author,
+                                                   about=about, status='1',
+                                                  link=link,selling_price=selling_price)
+                    course = Course.objects.get(id=cid)
+                    course.course_file = course_file
+                    course.save()
+                    course = Course.objects.get(id=cid)
+                    course_serializer = CourseSerializer(course)
+                    return JsonResponse(
+                        {'status': True, 'message': 'Course update successfully!', 'data': course_serializer.data},
+                    )
+                else:
+                    courses = Course.objects.filter(id=cid).update(course_title=course_title, author=author,
+                                                   about=about, status='1',
+                                                  link=link,selling_price=selling_price)
+                    # course = Course.objects.get(id=cid)
+                    # course.course_file = course_file
+                    # course.save()
+                    course = Course.objects.get(id=cid)
+                    course_serializer = CourseSerializer(course)
+                    return JsonResponse(
+                        {'status': True, 'message': 'Course update successfully!', 'data': course_serializer.data},
+                    )
 
-        if request.method == 'POST':
-            course_title = request.POST.get('course_title')
-            category_id = request.POST.get('category_id')
-            author = request.POST.get('author')
-            about = request.POST.get('about')
-            rating = request.POST.get('rating')
-            total_hours = request.POST.get('total_hours')
-            total_days = request.POST.get('total_days')
-            selling_price = request.POST.get('selling_price')
-            original_price = request.POST.get('original_price')
-            course_level = request.POST.get('course_level')
-            bestseller = request.POST.get('bestseller')
-            try:
-                course_file = request.FILES["course_file"]
-            except:
-                course_file = None
-            category = Category.objects.get(id=category_id)
-            course_serializer = CourseSerializer(data=request.POST)
-            course_serializer.is_valid()
-            if course_file is not None:
-                courses = Course.objects.filter(id=cid).update(course_title=course_title, author=author,
-                                                               category_id=category, about=about, rating=rating,
-                                                               total_hours=total_hours, total_days=total_days,
-                                                               selling_price=selling_price,
-                                                               original_price=original_price, course_level=course_level,
-                                                               bestseller=bestseller)
-                course = Course.objects.get(id=cid)
-                course.course_file = course_file
-                course.save()
-                course = Course.objects.get(id=cid)
-                course_serializer = CourseSerializer(course)
-                return JsonResponse(
-                    {'status': True, 'message': 'Course update successfully!', 'data': course_serializer.data},
-                )
-            else:
-                courses = Course.objects.filter(id=cid).update(course_title=course_title, author=author,
-                                                               category_id=category, about=about, rating=rating,
-                                                               total_hours=total_hours, total_days=total_days,
-                                                               selling_price=selling_price,
-                                                               original_price=original_price, course_level=course_level,
-                                                               bestseller=bestseller)
-                # course = Course.objects.get(id=cid)
-                # course.course_file = course_file
-                # course.save()
-                course = Course.objects.get(id=cid)
-                course_serializer = CourseSerializer(course)
-                return JsonResponse(
-                    {'status': True, 'message': 'Course update successfully!', 'data': course_serializer.data},
-                )
-        else:
-            return JsonResponse({'status': False, 'message': 'Only post method is allowed'}, safe=False)
+        except Exception as e:
+            return JsonResponse({'status': False, 'message': str(e)}, safe=False)
     else:
         return JsonResponse({'status': result['status'], 'message': result['message']}, safe=False)
 
@@ -1205,6 +1476,54 @@ def chapter_list(request,course_id):
                 return JsonResponse({'status': False, 'message': 'Only get method is allowed'}, safe=False)
         except Exception as e:
             return JsonResponse({'status': False, 'Exception':str(e)})
+    return JsonResponse({'status': False, 'message': 'Something went wrong'}, safe=False)
+
+@csrf_exempt
+def chapter_client_list(request):
+    result = authorized(request)
+    if result['status'] == True:
+        # try:
+        if request.method == 'POST':
+            id = request.POST.get('course_id')
+            user_id = request.POST.get('user_id')
+            user = User.objects.get(id=user_id)
+            c_id = Course.objects.get(id=id)
+            chapter1 = Chapter.objects.filter(course=c_id,).all()
+            # chapter1 = Chapter.objects.filter(course=c_id,name__user_id=user).all()
+            # chapter1 = Chapter.objects.filter(course=c_id,name__user_id=user).values("course","chapter_name","about","discussions","bookmarks","status","chapter_file","chapter_video","extra_file","link","name__chapter_status","name__completedVideoLenght",'name__totalVideoLength','name__is_completed')
+            chapter = Chapter.objects.filter(course=c_id).values('id')
+            try:
+                score = Score.objects.get(user=user,course_score=c_id)
+            except:
+                score = None
+            cid = []
+            for i in chapter:
+                cid.append(i['id'])
+            chapter_serializer = ChapterSerializer(chapter1,many=True)
+            chapter_status = ChapterStatus.objects.filter(user=user,name__in=cid).all()
+            chapter_status_serializer = ChapterStatusSerializer(chapter_status,many=True)
+            course_status = CourseStatus.objects.filter(name=c_id,user=user).values('course_status')
+            course_status1 = course_status[0]
+            if score == None:
+                quiz_done = False
+            else:
+                quiz_done = True
+            chapter_data = chapter_serializer.data
+            chapter_status_data = chapter_status_serializer.data
+            for i in chapter_data:
+                i['chapter_status'] = None
+                for j in chapter_status_data:
+                    if i['id'] == j['name']:
+                        i['chapter_status'] = j
+                    else:
+                        pass
+            return JsonResponse(
+                {'status': True, 'message': 'Chapter listed successfully!', 'chapter_data': chapter_data, 'course_status':course_status1['course_status'],'Quiz_Completed':quiz_done,},
+                safe=False)
+        else:
+            return JsonResponse({'status': False, 'message': 'Only get method is allowed'}, safe=False)
+        # except Exception as e:
+        #     return JsonResponse({'status': False, 'Exception':str(e)})
     return JsonResponse({'status': False, 'message': 'Something went wrong'}, safe=False)
 
 
@@ -1388,12 +1707,13 @@ def send_email(request):
         if request.method == 'POST':
             subject = request.POST.get('subject')
             message = request.POST.get('message')
+            email = request.POST.get('email')
             email_from = "noreply@i4dev.in"
-            users = User.objects.all().filter(~Q(id=1),~Q(user_role=2))
-            for user in users:
-                recipient_list = {user.email}
-                send_mail( subject, message, email_from, recipient_list )
-            return JsonResponse({'status':True,'message': 'Email Sent successfully!','data':""}, status=status.HTTP_201_CREATED)
+            # users = User.objects.all().filter(~Q(id=1),~Q(user_role=2))
+            # for user in users:
+            #     recipient_list = {user.email}
+            send_mail( subject, message, email_from,[email],fail_silently=False )
+            return JsonResponse({'status':True,'message': 'Email Sent successfully!','data':""},)
         else:
             return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
     else:
@@ -1489,32 +1809,68 @@ def reset_password(request):
 def add_quiz(request):
     result = authorized(request)
     if result['status'] == True:
-        if request.method == 'POST':
-            chapter_id = Chapter.objects.get(id=request.POST.get('chapter_id'))
-            question = request.POST.get('question')
-            marks = request.POST.get('marks')
-            answer = request.POST.get('answer')
-            option = request.POST.get('option')
+        try:
+            if request.method == 'POST':
+                course_id = Course.objects.get(id=request.POST.get('course_id'))
+                question = request.POST.get('question')
+                marks = request.POST.get('marks')
+                answer = request.POST.get('answer')
+                option = request.POST.get('option')
 
-            quiz_serializer = QuizQuestionSerializer(data=request.POST)
-            quiz_serializer.is_valid()
-            quizs = Quiz_question.objects.create(chapter = chapter_id ,marks = marks,question = question,question_status = 1,options=option)
-            quizs_ans = Quiz_ques_answer.objects.create(question = quizs ,answer = answer,)
-
-            # chapters = Quiz_question.objects.get(id=id)
-            # quiz_serializer = QuizQuestionSerializer(chapters)
-            return JsonResponse({'status':True,'message': 'Quiz added successfully!'},)
-        else:
-            return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
+                quizs = Quiz_question.objects.create(course = course_id ,marks = marks,question = question,question_status = 1,options=option)
+                quizs_ans = Quiz_ques_answer.objects.create(question = quizs ,answer = answer,)
+                return JsonResponse({'status':True,'message': 'Quiz added successfully!',},)
+            else:
+                return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
+        except Exception as e:
+            return JsonResponse({'status':False,'Exception':str(e)})
     else:
         return JsonResponse({'status':result['status'],'message': result['message']}, safe=False)
+
+@csrf_exempt
+def quiz_edit(request):
+    result = authorized(request)
+    if result['status'] == True:
+        try:
+            if request.method == 'POST':
+                id = request.POST.get('id')
+                course_id = Course.objects.get(id=request.POST.get('course_id'))
+                question = request.POST.get('question')
+                marks = request.POST.get('marks')
+                answer = request.POST.get('answer')
+                option = request.POST.get('option')
+
+                quizs = Quiz_question.objects.filter(id=id,course=course_id ,).update(marks = marks,question = question,question_status = 1,options=option)
+                quizs_ans = Quiz_ques_answer.objects.filter(question=quizs).update(answer = answer,)
+                return JsonResponse({'status':True,'message': 'Quiz updated successfully!',},)
+            else:
+                return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
+        except Exception as e:
+            return JsonResponse({'status':False,'Exception':str(e)})
+    else:
+        return JsonResponse({'status':result['status'],'message': result['message']}, safe=False)
+
+
+@csrf_exempt
+def quiz_delete(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            pk = request.POST.get('id')
+            try:
+                users = Quiz_question.objects.get(id=pk)
+                users.delete()
+                return JsonResponse({ 'Status': True, 'message': 'Quiz deleted successfully!'})
+            except:
+                return JsonResponse({ 'Status': False, 'message': 'Id not found!'})
+    return JsonResponse({"message": "Unauthorised User", })
 
 def quiz_list(request,chid):
     result = authorized(request)
     if result['status'] == True:
         if request.method == 'GET':
-            chapter = Chapter.objects.get(id=chid)
-            quiz = Quiz_question.objects.all().filter(chapter_id=chapter,question_status=1).order_by('-id')
+            course = Course.objects.get(id=chid)
+            quiz = Quiz_question.objects.all().filter(course_id=course,question_status=1).order_by('-id')
             quiz_serializer = QuizQuestionSerializer(quiz, many=True)
             return JsonResponse({'status':True,'message': 'quiz listed successfully!','data':quiz_serializer.data}, safe=False)
         else:
@@ -1557,38 +1913,23 @@ def quiz_detail(request,quizid):
         return JsonResponse({'status':result['status'],'message': result['message']}, safe=False)
 
 
-@csrf_exempt
-def quiz_delete(request,quizid):
-    result = authorized(request)
-    if result['status'] == True:
-        try:
-            quizDetail = Quiz_question.objects.get(id=quizid)
-        except Quiz_question.DoesNotExist:
-            return JsonResponse({'status':False,'message': 'The quiz does not exist'})
-
-        if request.method == 'DELETE':
-            quizDetail.delete()
-            Quiz_ques_answer.objects.all().filter(question_id=quizid).delete()
-
-            return JsonResponse({'status':True,'message': 'Quiz deleted successfully!'})
-        else:
-            return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
-    else:
-        return JsonResponse({'status':result['status'],'message': result['message']}, safe=False)
-
 import re
 @csrf_exempt
 def answer_check(request):
     result = authorized(request)
     if result['status'] == True:
+        answer = request.POST.get('answers')
+        t = type(answer)
+        s = answer.strip('{}')
+        lss = s.split(',')
         try:
             user = User.objects.get(id=request.POST.get('user_id'))
-            chapter = Chapter.objects.get(id=request.POST.get('chapter_id'))
+            course = Course.objects.get(id=request.POST.get('course_id'))
             answers = request.POST.get('answers').replace('\"','')
             s = answers.strip('{}')
             ls = s.split(',')
             marks = 0
-
+            total = 0
             for i in ls:
                 l = i.split(':')
                 id = l[0].strip()
@@ -1596,6 +1937,9 @@ def answer_check(request):
                 question = Quiz_question.objects.get(id=int(id))
                 check = Quiz_ques_answer.objects.filter(question=question).values('answer')
                 check1=check[0]
+                total_marks = Quiz_question.objects.filter(id=int(id)).values('marks')
+                total_marks1 = total_marks[0]
+                total += int(total_marks1['marks'])
                 if check1['answer'] == answer:
                     m = Quiz_question.objects.filter(id=int(id)).values('marks')
                     mr = m[0]
@@ -1604,12 +1948,14 @@ def answer_check(request):
 
                 else:
                     marks += 0
+            score = Score.objects.filter(user=user,course_score=course).delete()
+            score = Score.objects.update_or_create(user=user,course_score=course,score=marks)
+            score = Score.objects.get(user=user,course_score=course)
+            score_serializer = ScoreSerializer(score)
 
-            score = Score.objects.update_or_create(user=user,chapter_score=chapter,score=marks)
-            score_serializer = ScoreSerializer(score,many=True)
-            return JsonResponse({'status':True,'data':score_serializer.data,})
+            return JsonResponse({'status':True,'data':score_serializer.data,'total_marks':total})
         except Exception as e:
-            return JsonResponse({'ststus':False,'Exception':str(e)})
+            return JsonResponse({'ststus':False,'Exception':str(e),"message":str(lss)})
         return JsonResponse({'status':True,'data':'CBZ'})
     return JsonResponse({'status':False,'message':'Unauthorised User'})
 
@@ -1635,3 +1981,320 @@ def quiz_changeStatus(request,quizid):
             return JsonResponse({'status':False,'message': 'Only post method is allowed'}, safe=False)
     else:
         return JsonResponse({'status':result['status'],'message': result['message']}, safe=False)
+
+@csrf_exempt
+def add_banner(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                image = request.FILES["image"]
+                banner_serializer = BannerSerializer(data=request.POST)
+                if banner_serializer.is_valid():
+                    banner = Banner.objects.create(title=title,image=image,link=link)
+                    return JsonResponse({'Status':True,'message': 'Banner Created Sucessfully!', 'data': banner_serializer.data})
+            except:
+                return JsonResponse({'Status':True,'message': 'Something went wrong!', })
+        return JsonResponse(banner_serializer.errors)
+    return JsonResponse({"Message":"Unauthorised User",})
+
+def banner_list_client(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Banner.objects.all()
+            banner_serializer = BannerSerializer(banner, many=True)
+            return JsonResponse({'message': 'Banner listed successfully!', 'data': banner_serializer.data}, safe=False)
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def banner_edit(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                pk = request.POST.get('id')
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                try:
+                    image = request.FILES["image"]
+                except:
+                    image=None
+                if image is not None:
+                    banner_serializer = BannerSerializer(data=request.POST)
+                    banner_serializer.is_valid()
+                    banner = Banner.objects.filter(id=pk).update(title=title,link=link)
+                    # users = Banner.objects.get(id=pk)
+                    banner = Banner.objects.get(id=pk)
+                    banner.image = image
+                    banner.save()
+                    return JsonResponse({'Status':True,'message': 'Banner update successfully!', 'data': banner_serializer.data}
+                                       )
+                else:
+                    banner_serializer = BannerSerializer(data=request.POST)
+                    banner_serializer.is_valid()
+                    banner = Banner.objects.filter(id=pk).update(title=title,link=link)
+                    return JsonResponse({'Status':True,'message': 'Banner update successfully!', 'data': banner_serializer.data}
+                                   )
+            except Exception as e:
+                return JsonResponse({'Status':False,'Exception':str(e)})
+        return JsonResponse({'Status':False})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def banner_delete(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            pk = request.POST.get('id')
+            try:
+                users = Banner.objects.get(id=pk)
+                users.delete()
+                return JsonResponse({ 'Status': True, 'message': 'Banner deleted successfully!'})
+            except:
+                return JsonResponse({ 'Status': False, 'message': 'Id not found!'})
+    return JsonResponse({"message": "Unauthorised User", })
+
+def banner_list(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Banner.objects.all().order_by('-id')
+            banner_serializer = BannerSerializer(banner, many=True)
+            return JsonResponse({'Status': True, 'message': 'Banner listed successfully!', 'data': banner_serializer.data}, safe=False)
+        return JsonResponse({'Status': False, 'message': 'Something went wrong!',})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def add_event(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                image = request.FILES["image"]
+                about = request.POST.get('about')
+                banner = Upcomingevents.objects.create(title=title,image=image,link=link,about=about)
+                return JsonResponse({'Status':True,'message': 'Event Created Sucessfully!',})
+            except Exception as e:
+                return JsonResponse({'Status':False,'Exceprion': str(e), })
+        return JsonResponse({'Status': False, 'message': 'Something went wrong!',})
+    return JsonResponse({"Message":"Unauthorised User",})
+
+@csrf_exempt
+def event_edit(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                pk = request.POST.get('id')
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                about = request.POST.get('about')
+                try:
+                    image = request.FILES["image"]
+                except:
+                    image=None
+                if image is not None:
+                    banner = Upcomingevents.objects.filter(id=pk).update(title=title,link=link,about=about)
+                    # users = Banner.objects.get(id=pk)
+                    banner = Upcomingevents.objects.get(id=pk)
+                    banner.image = image
+                    banner.save()
+                    return JsonResponse({'Status':True,'message': 'Event update successfully!',}
+                                       )
+                else:
+                    banner = Upcomingevents.objects.filter(id=pk).update(title=title,link=link, about=about)
+                    return JsonResponse({'Status':True,'message': 'Event update successfully!', }
+                                   )
+            except Exception as e:
+                return JsonResponse({'Status':False,'Exception':str(e)})
+        return JsonResponse({'Status':False})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def event_delete(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            pk = request.POST.get('id')
+            try:
+                users = Upcomingevents.objects.get(id=pk)
+                users.delete()
+                return JsonResponse({ 'Status': True, 'message': 'Event deleted successfully!'})
+            except:
+                return JsonResponse({ 'Status': False, 'message': 'Id not found!'})
+    return JsonResponse({"message": "Unauthorised User", })
+
+def event_list(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Upcomingevents.objects.all().order_by('-id')
+            banner_serializer = EventSerializer(banner, many=True)
+            return JsonResponse({'Status': True, 'message': 'Event listed successfully!', 'data': banner_serializer.data}, safe=False)
+        return JsonResponse({'Status': False, 'message': 'Something went wrong!',})
+    return JsonResponse({"message": "Unauthorised User", })
+
+def event_list_client(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Upcomingevents.objects.all()
+            banner_serializer = EventSerializer(banner, many=True)
+            return JsonResponse({'message': 'Event listed successfully!', 'data': banner_serializer.data}, safe=False)
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def add_service(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                image = request.FILES["image"]
+                banner = Services.objects.create(title=title,image=image,link=link)
+                return JsonResponse({'Status':True,'message': 'Services Created Sucessfully!',})
+            except Exception as e:
+                return JsonResponse({'Status':False,'Exception': str(e), })
+        return JsonResponse({'Status': False, 'message': 'Something went wrong!',})
+    return JsonResponse({"Message":"Unauthorised User",})
+
+def service_list_client(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Services.objects.all()
+            banner_serializer = ServicesSerializer(banner, many=True)
+            return JsonResponse({'message': 'Services listed successfully!', 'data': banner_serializer.data}, safe=False)
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def service_edit(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            try:
+                pk = request.POST.get('id')
+                title = request.POST.get('title')
+                link = request.POST.get('link')
+                try:
+                    image = request.FILES["image"]
+                except:
+                    image=None
+                if image is not None:
+                    banner = Services.objects.filter(id=pk).update(title=title,link=link)
+                    # users = Banner.objects.get(id=pk)
+                    banner = Banner.objects.get(id=pk)
+                    banner.image = image
+                    banner.save()
+                    return JsonResponse({'Status':True,'message': 'Services update successfully!',}
+                                       )
+                else:
+                    banner = Services.objects.filter(id=pk).update(title=title,link=link)
+                    return JsonResponse({'Status':True,'message': 'Services update successfully!',}
+                                   )
+            except Exception as e:
+                return JsonResponse({'Status':False,'Exception':str(e)})
+        return JsonResponse({'Status':False})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def service_delete(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            pk = request.POST.get('id')
+            try:
+                users = Services.objects.get(id=pk)
+                users.delete()
+                return JsonResponse({ 'Status': True, 'message': 'Services deleted successfully!'})
+            except:
+                return JsonResponse({ 'Status': False, 'message': 'Id not found!'})
+    return JsonResponse({"message": "Unauthorised User", })
+
+def service_list(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'GET':
+            banner = Services.objects.all().order_by('-id')
+            banner_serializer = ServicesSerializer(banner, many=True)
+            return JsonResponse({'Status': True, 'message': 'Services listed successfully!', 'data': banner_serializer.data}, safe=False)
+        return JsonResponse({'Status': False, 'message': 'Something went wrong!',})
+    return JsonResponse({"message": "Unauthorised User", })
+
+
+@csrf_exempt
+def buy_package(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == 'POST':
+            user = User.objects.get(id=request.POST.get('user_id'))
+            try:
+                packge = Package.objects.get(id=request.POST.get('package_id'))
+                package_alloted = PackageAlloted.objects.get(user=user,package_name=packge)
+            except:
+                package_alloted = None
+            try:
+                course =  Course.objects.get(id=request.POST.get('course_id'))
+                course_alloted = CourseAlloted.objects.get(user=user,course_name=course)
+            except:
+                course_alloted = None
+            if package_alloted is not None:
+                return JsonResponse({'status':False,'response':'This package is already alloted to You'})
+            if course_alloted is not None:
+                return JsonResponse({'status':False,'response':'This course is already alloted to You'})
+            amount = request.POST.get('amount')
+            client = razorpay.Client(auth=("rzp_test_uyIMOvTtAIVnuN", "lj4ElrD7sKLSBczz2VqJnexz"))
+            data = { "amount": int(amount)*100, "currency": "INR", "receipt": "order_rcptid_11" }
+            payment = client.order.create(data=data)
+        return JsonResponse({'status':True,'response':payment})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def add_certificate(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method ==  "POST":
+            user = User.objects.get(id=request.POST.get("user_id"))
+            course = Course.objects.get(id=request.POST.get("course_id"))
+            try:
+                certi = Certificate.objects.get(user=user,course_score=course)
+            except:
+                certi = None
+            if certi == None:
+                Certificate.objects.create(user=user,course_score=course)
+                return JsonResponse({'status':True,})
+            else:
+                return JsonResponse({'status':True,})
+        return JsonResponse({'Status': False, 'message': 'only post method is allowed',})
+    return JsonResponse({"message": "Unauthorised User", })
+
+@csrf_exempt
+def query_form(request):
+    result = authorized(request)
+    if result['status'] == True:
+        try:
+            if request.method ==  "POST":
+                email = request.POST.get('email')
+                subject = request.POST.get('subject')
+                content = request.POST.get('content')
+                Query.objects.create(email=email,subject=subject,content=content)
+                return JsonResponse({'status':True,'message':'Query added'})
+        except Exception as e:
+            return JsonResponse({'status':False,"Exception": str(e), })
+    return JsonResponse({"message": "Unauthorised User", })
+
+
+def show_queries(request):
+    result = authorized(request)
+    if result['status'] == True:
+        if request.method == "GET":
+            query =  Query.objects.all().order_by('-id')
+            queryserializer = QuerySerializer(query, many=True)
+            return JsonResponse({'status':True,'data':queryserializer.data})
+    return JsonResponse({"message": "Unauthorised User", })
