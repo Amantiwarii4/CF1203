@@ -358,7 +358,7 @@ def edit_package(request):
                 except:
                     image = None
                 if image == None:
-                    Package.objects.filter(id=id).update(name=name,course=course,about=about,price=price,image=image)
+                    Package.objects.filter(id=id).update(name=name,course=course,about=about,price=price)
                     return JsonResponse({"status":True,"message":"Package updated sucessfull"})
                 else:
                     Package.objects.filter(id=id).update(name=name,course=course,about=about,price=price,image=image)

@@ -142,9 +142,9 @@ class Quiz_ques_answer(models.Model):
 class Package(models.Model):
     name = models.CharField(max_length=150, blank=False)
     course = ListCharField(
-        base_field=CharField(max_length=10),
+        base_field=CharField(max_length=200),
         size=6,
-        max_length=(6 * 11),  # 6 * 10 character nominals, plus commas
+        max_length=(6 * 1100),  # 6 * 10 character nominals, plus commas
     )
     price = models.IntegerField(blank=True)
     about = models.TextField(_('about'), null=True, blank=True)
